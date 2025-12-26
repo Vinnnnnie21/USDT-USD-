@@ -27,8 +27,6 @@ def get_binance_p2p_price(trade_type):
     except: return None
 
 def get_real_usd_cny():
-    # Streamlit Cloud 有时访问 Yahoo Finance 不稳定，这里增加备用源逻辑
-    # 暂时还是尝试 Yahoo，如果失败用户可能需要刷新
     try:
         import yfinance as yf
         ticker = yf.Ticker("CNY=X")
@@ -36,7 +34,7 @@ def get_real_usd_cny():
         return data['Close'].iloc[-1] if not data.empty else ticker.history(period="1d")['Close'].iloc[-1]
     except: return None
 
-# --- 初始化 Session State (用于存储数据) ---
+# --- 初始化 Session State ---
 if 'history' not in st.session_state:
     st.session_state.history = []
 
@@ -44,16 +42,13 @@ if 'history' not in st.session_state:
 st.title("⚡ USDT 溢价率实时监控终端")
 st.caption("数据来源: Binance P2P & Yahoo Finance | 自动刷新: 约 5-10 秒")
 
-# 创建占位符容器
-metric_container = st.container()
-chart_container = st.empty()
+# 🔥 修复点 1：使用 st.empty() 创建单一占位符，防止数据堆叠
+dashboard_placeholder = st.empty()
 
 # --- 主循环逻辑 ---
-# Streamlit 的特殊机制，为了自动刷新，我们使用 rerun
 if st.button("🔄 点击开始/刷新监控"):
     st.rerun()
 
-# 自动运行逻辑
 while True:
     # 1. 获取数据
     usdt_buy = get_binance_p2p_price("BUY")
@@ -75,55 +70,59 @@ while True:
             "usd": usd_cny
         }
         st.session_state.history.append(new_data)
-        
-        # 保持最近 100 个点
         if len(st.session_state.history) > 100:
             st.session_state.history.pop(0)
             
-        # 转换为 DataFrame
         df = pd.DataFrame(st.session_state.history)
 
-        # --- 2. 渲染指标卡片 ---
-        with metric_container:
-            # 清空旧内容
-            col1, col2, col3 = st.columns(3)
-            col1.metric("USDT 溢价率", f"{premium_rate:+.2f}%", delta_color="inverse")
-            col2.metric("Binance USDT", f"¥{usdt_avg:.3f}")
-            col3.metric("USD 汇率", f"¥{usd_cny:.4f}")
+        # 🔥 修复点 2：所有内容都在 placeholder 容器内渲染
+        # 每次循环开始，这里面的内容都会被清空重画
+        with dashboard_placeholder.container():
+            # (A) 顶部指标栏
+            kpi1, kpi2, kpi3 = st.columns(3)
+            kpi1.metric("USDT 溢价率", f"{premium_rate:+.2f}%", delta_color="inverse")
+            kpi2.metric("Binance USDT", f"¥{usdt_avg:.3f}")
+            kpi3.metric("USD 汇率", f"¥{usd_cny:.4f}")
 
-        # --- 3. 渲染交互式图表 ---
-        fig = go.Figure()
-        
-        # 动态颜色
-        color = '#00ff00' if premium_rate > 0 else '#ff3333'
-        
-        fig.add_trace(go.Scatter(
-            x=df['time'], y=df['rate'],
-            mode='lines+markers',
-            line=dict(color=color, width=2),
-            marker=dict(size=6),
-            name='Premium',
-            hovertemplate='时间: %{x}<br>溢价: %{y:.2f}%<extra></extra>'
-        ))
-        
-        fig.add_hline(y=0, line_dash="dash", line_color="gray")
-        
-        fig.update_layout(
-            height=500,
-            paper_bgcolor='#0e1117',
-            plot_bgcolor='#0e1117',
-            xaxis=dict(showgrid=True, gridcolor='#262730', tickmode='auto', nticks=10),
-            yaxis=dict(showgrid=True, gridcolor='#262730', tickformat="+.2f"),
-            margin=dict(l=0, r=0, t=30, b=0),
-            font=dict(color="white")
-        )
+            # (B) 交互式图表
+            fig = go.Figure()
+            color = '#00ff00' if premium_rate > 0 else '#ff3333'
+            
+            fig.add_trace(go.Scatter(
+                x=df['time'], y=df['rate'],
+                mode='lines+markers',
+                line=dict(color=color, width=2),
+                marker=dict(size=6),
+                name='Premium',
+                # 🔥 修复点 3：把价格整合进鼠标悬停提示 (Tooltip)
+                # customdata 用于传递额外数据给 hovertemplate
+                customdata=df[['usdt', 'usd']],
+                hovertemplate=
+                '<b>⏱ %{x}</b><br>' +
+                '📈 溢价率: <b>%{y:.2f}%</b><br>' +
+                '-------------------<br>' +
+                '💰 USDT价格: ¥%{customdata[0]:.3f}<br>' +
+                '🇺🇸 美元汇率: ¥%{customdata[1]:.4f}<br>' +
+                '<extra></extra>'
+            ))
+            
+            fig.add_hline(y=0, line_dash="dash", line_color="gray")
+            
+            fig.update_layout(
+                height=500,
+                paper_bgcolor='#0e1117',
+                plot_bgcolor='#0e1117',
+                xaxis=dict(showgrid=True, gridcolor='#262730', tickmode='auto', nticks=10),
+                yaxis=dict(showgrid=True, gridcolor='#262730', tickformat="+.2f"),
+                margin=dict(l=0, r=0, t=10, b=0),
+                font=dict(color="white"),
+                hovermode="x unified" # 鼠标一动，显示X轴上所有信息
+            )
 
-        # 更新图表
-        chart_container.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True)
     
     else:
-        st.warning(f"[{now_time}] 数据获取中，请稍候...")
+        # 如果获取失败，只在占位符里显示警告，不会堆叠
+        dashboard_placeholder.warning(f"[{now_time}] 数据获取中，请稍候...")
 
-    # 休息 5 秒
     time.sleep(5)
-    # 注意：Streamlit Cloud 在循环中会自动更新前端，不需要手动 rerun

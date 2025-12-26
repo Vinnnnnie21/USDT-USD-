@@ -8,7 +8,7 @@ import pytz
 
 # --- 页面配置 ---
 st.set_page_config(
-    page_title="USDT 实时溢价监控",
+    page_title="USDT/USD 实时溢价监控",
     page_icon="⚡",
     layout="wide"
 )
@@ -39,7 +39,7 @@ if 'history' not in st.session_state:
     st.session_state.history = []
 
 # --- 页面布局 ---
-st.title("⚡ USDT 溢价率实时监控终端")
+st.title("⚡ USDT/USD实时溢价")
 st.caption("数据来源: Binance P2P & Yahoo Finance | 自动刷新: 约 5-10 秒")
 
 # 🔥 修复点 1：使用 st.empty() 创建单一占位符，防止数据堆叠
